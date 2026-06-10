@@ -1,0 +1,361 @@
+openapi: "3.1.0"
+info:
+  title: Financial Spend Monitor
+  version: "1.0.0"
+  description: >
+    Analyst-facing API for reviewing customer spending patterns against
+    historical baselines. Backed by Cassandra (hot) and Iceberg via Presto
+    (cold/analytical). REQ coverage: REQ-001 through REQ-007.
+
+servers:
+  - url: http://localhost:8000
+    description: Local dev server
+
+paths:
+
+  /customers/{customer_id}:
+    get:
+      operationId: get_customer
+      summary: Customer profile and risk tier (REQ-001)
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: "a1b2c3d4-0000-0000-0000-000000000001"
+      responses:
+        "200":
+          description: Customer found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+              examples:
+                active_customer:
+                  value:
+                    customer_id: "a1b2c3d4-0000-0000-0000-000000000001"
+                    first_name: "Jordan"
+                    last_name: "Rivera"
+                    email: "jordan.rivera@example.com"
+                    account_status: "active"
+                    risk_tier: "low"
+                    kyc_verified: true
+                    updated_at: "2025-05-15T10:23:00Z"
+                high_risk_customer:
+                  value:
+                    customer_id: "a1b2c3d4-0000-0000-0000-000000000002"
+                    first_name: "Alex"
+                    last_name: "Chen"
+                    email: "alex.chen@example.com"
+                    account_status: "active"
+                    risk_tier: "high"
+                    kyc_verified: true
+                    updated_at: "2025-06-01T08:00:00Z"
+        "404":
+          description: Customer not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                not_found:
+                  value:
+                    detail: "Customer a1b2c3d4-0000-0000-0000-999999999999 not found"
+
+  /customers/{customer_id}/transactions:
+    get:
+      operationId: get_customer_transactions
+      summary: Last-30-day card transactions and open fraud alerts (REQ-002, REQ-005)
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: "a1b2c3d4-0000-0000-0000-000000000001"
+      responses:
+        "200":
+          description: Transactions and fraud alerts returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionsResponse"
+              examples:
+                normal_activity:
+                  value:
+                    customer_id: "a1b2c3d4-0000-0000-0000-000000000001"
+                    transactions:
+                      - card_id: "c0000001-0000-0000-0000-000000000001"
+                        transaction_id: "t0000001-0000-0000-0000-000000000001"
+                        txn_date: "2025-06-09"
+                        merchant_name: "Whole Foods Market"
+                        merchant_category: "grocery"
+                        amount: 87.42
+                        currency: "USD"
+                        posted: true
+                      - card_id: "c0000001-0000-0000-0000-000000000001"
+                        transaction_id: "t0000001-0000-0000-0000-000000000002"
+                        txn_date: "2025-06-08"
+                        merchant_name: "Shell Gas Station"
+                        merchant_category: "fuel"
+                        amount: 54.10
+                        currency: "USD"
+                        posted: true
+                    fraud_alerts: []
+                fraud_flagged:
+                  value:
+                    customer_id: "a1b2c3d4-0000-0000-0000-000000000002"
+                    transactions:
+                      - card_id: "c0000002-0000-0000-0000-000000000001"
+                        transaction_id: "t0000002-0000-0000-0000-000000000001"
+                        txn_date: "2025-06-09"
+                        merchant_name: "Unknown Vendor"
+                        merchant_category: "other"
+                        amount: 4200.00
+                        currency: "USD"
+                        posted: false
+                    fraud_alerts:
+                      - alert_id: "f0000001-0000-0000-0000-000000000001"
+                        raised_at: "2025-06-09T03:14:00Z"
+                        severity: "high"
+                        alert_type: "amount_anomaly"
+                        triggering_txn_id: "t0000002-0000-0000-0000-000000000001"
+                        risk_score: 87.5
+        "404":
+          description: Customer not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /customers/{customer_id}/spend-summary:
+    get:
+      operationId: get_spend_summary
+      summary: Federated spend summary — live vs. 12-month baseline (REQ-003, REQ-004, REQ-006)
+      description: >
+        Executes a single federated Presto query joining
+        cassandra.financial_user38.card_transactions_recent (hot, last 30 days)
+        against iceberg_data.financial_reference.transactions_archive
+        (cold, prior 12 months) to compute spend_ratio.
+        spend_ratio > 1.0 means above baseline; > 2.0 is flag-worthy.
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: "a1b2c3d4-0000-0000-0000-000000000001"
+      responses:
+        "200":
+          description: Spend summary returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpendSummary"
+              examples:
+                normal_spend:
+                  value:
+                    customer_id: "a1b2c3d4-0000-0000-0000-000000000001"
+                    spend_last_30d: 1842.55
+                    txn_count_last_30d: 23
+                    avg_daily_spend_recent: 61.42
+                    total_spend_12mo: 21480.00
+                    avg_daily_spend_12mo: 58.85
+                    spend_ratio: 1.04
+                spike_detected:
+                  value:
+                    customer_id: "a1b2c3d4-0000-0000-0000-000000000002"
+                    spend_last_30d: 9300.00
+                    txn_count_last_30d: 8
+                    avg_daily_spend_recent: 310.00
+                    total_spend_12mo: 18000.00
+                    avg_daily_spend_12mo: 49.32
+                    spend_ratio: 6.28
+        "404":
+          description: Customer not found or no transaction history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: Presto query exceeded 5-second timeout (REQ-007)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                timeout:
+                  value:
+                    detail: "Query timed out after 5 seconds"
+
+components:
+  schemas:
+
+    Customer:
+      type: object
+      required:
+        - customer_id
+        - first_name
+        - last_name
+        - email
+        - account_status
+        - risk_tier
+        - kyc_verified
+        - updated_at
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          format: email
+        account_status:
+          type: string
+          enum: [active, suspended, closed]
+        risk_tier:
+          type: string
+          enum: [low, medium, high, restricted]
+        kyc_verified:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+
+    Transaction:
+      type: object
+      required:
+        - card_id
+        - transaction_id
+        - txn_date
+        - merchant_name
+        - merchant_category
+        - amount
+        - currency
+        - posted
+      properties:
+        card_id:
+          type: string
+          format: uuid
+        transaction_id:
+          type: string
+          format: uuid
+        txn_date:
+          type: string
+          format: date
+        merchant_name:
+          type: string
+        merchant_category:
+          type: string
+        amount:
+          type: number
+          format: double
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        posted:
+          type: boolean
+
+    FraudAlert:
+      type: object
+      required:
+        - alert_id
+        - raised_at
+        - severity
+        - alert_type
+        - risk_score
+      properties:
+        alert_id:
+          type: string
+          format: uuid
+        raised_at:
+          type: string
+          format: date-time
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        alert_type:
+          type: string
+          enum: [velocity, geo_anomaly, amount_anomaly, card_not_present]
+        triggering_txn_id:
+          type: string
+          format: uuid
+          nullable: true
+        risk_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+
+    TransactionsResponse:
+      type: object
+      required:
+        - customer_id
+        - transactions
+        - fraud_alerts
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        fraud_alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/FraudAlert"
+
+    SpendSummary:
+      type: object
+      required:
+        - customer_id
+        - spend_last_30d
+        - txn_count_last_30d
+        - avg_daily_spend_recent
+        - total_spend_12mo
+        - avg_daily_spend_12mo
+        - spend_ratio
+      properties:
+        customer_id:
+          type: string
+          format: uuid
+        spend_last_30d:
+          type: number
+          format: double
+          description: Total card spend in the last 30 days (Cassandra)
+        txn_count_last_30d:
+          type: integer
+          description: Number of transactions in the last 30 days
+        avg_daily_spend_recent:
+          type: number
+          format: double
+          description: spend_last_30d / 30
+        total_spend_12mo:
+          type: number
+          format: double
+          description: Total posted spend over the prior 12 months (Iceberg)
+        avg_daily_spend_12mo:
+          type: number
+          format: double
+          description: Historical average daily spend over 12 months
+        spend_ratio:
+          type: number
+          format: double
+          description: avg_daily_spend_recent / avg_daily_spend_12mo. >2.0 is flag-worthy.
+
+    Error:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
