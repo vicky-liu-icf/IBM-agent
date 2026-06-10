@@ -1,0 +1,42 @@
+.env
+.watsonx-data/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# Generated sample data (reproduced by setup/sample-data/*/generate_data.py)
+setup/sample-data/*/generated_data/
+
+# Python artifacts
+setup/sample-data/__pycache__/
+setup/sample-data/.venv/
+
+# Workshop install state (machine-local)
+.workshop-installed
+.workshop-timing.log
+.claude/
+dist/
+
+# Shared-cloud-wxd branch: populated cpd_vars.sh (contains cluster creds)
+setup/cluster/cpd_vars.sh
+setup/cluster/cpd_vars.sh.bak
+
+# Python bytecode in setup/cluster/lib
+setup/cluster/lib/__pycache__/
+
+# Shared-cloud-wxd branch: cpd-cli local workspace (image pulls, logs, kubeconfigs)
+cpd-cli-workspace/
+
+# Shared-cloud-wxd branch: per-attendee plaintext credentials (M3 provision-users.sh)
+slips.csv
+slips.csv.bak
+
+# Shared-cloud-wxd branch: per-workshop cluster endpoints (M4 bundle-baked)
+setup/workshop.env
+
+# Shared-cloud-wxd branch: attendee venv created by connect-workshop.sh
+.venv/
+
+# Shared-cloud-wxd: per-attendee printable slips (contain plaintext passwords)
+dist/slips/
