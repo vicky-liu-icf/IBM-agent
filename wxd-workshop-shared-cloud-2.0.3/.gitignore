@@ -40,3 +40,4 @@ setup/workshop.env
 
 # Shared-cloud-wxd: per-attendee printable slips (contain plaintext passwords)
 dist/slips/
+.env.bak
